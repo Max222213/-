@@ -2,20 +2,40 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>ПУДЖ РАННЕР</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   html,body{margin:0;height:100%;overflow:hidden;background:#222;display:flex;align-items:center;justify-content:center;}
   canvas{background:#c9f5d9;border-radius:8px;}
   #score{position:absolute;right:calc(50% - 390px);top:40px;font-size:22px;font-weight:bold;color:#fff;text-shadow:1px 1px 3px #000;}
   #pudge{position:absolute;font-size:26px;font-weight:bold;color:#fff;text-shadow:1px 1px 3px #000;pointer-events:none;}
+  #tg-info{position:absolute;top:10px;left:10px;font-size:12px;color:#888;}
 </style>
 </head>
 <body>
 <canvas id="cvs"></canvas>
 <div id="score">00000</div>
 <div id="pudge">ПУДЖ</div>
+<div id="tg-info">Telegram Web App</div>
 
 <script>
+// ========== TELEGRAM WEB APP INTEGRATION ==========
+let tg = window.Telegram?.WebApp;
+let isTelegram = false;
+
+if (tg) {
+    isTelegram = true;
+    // Инициализация Telegram Web App
+    tg.expand(); // На весь экран
+    tg.enableClosingConfirmation(); // Подтверждение закрытия
+    tg.setHeaderColor('#222222'); // Цвет шапки под игру
+    tg.backgroundColor = '#222222'; // Цвет фона
+    
+    // Скрываем Telegram info в продакшене
+    document.getElementById('tg-info').style.display = 'none';
+}
+
 /* ---------- настройки ---------- */
 const cfg = {
   dragonImg : "img/dragon.png",
@@ -38,113 +58,260 @@ const music = new Audio(cfg.musicFile);
 music.loop = true;
 music.volume = 0.5;
 
+// Флаг для отслеживания первого запуска музыки
+let musicStarted = false;
+
+function startMusic() {
+    if (!musicStarted && music) {
+        music.play().catch(e => {
+            console.log('Music autoplay blocked, waiting for user interaction');
+        });
+        musicStarted = true;
+    }
+}
+
 /* ---------- ресурсы ---------- */
 const R = {};
-function loadImg(name,src){ const i=new Image(); i.src=src; R[name]=i; }
+function loadImg(name,src){ 
+    const i = new Image(); 
+    i.src = src; 
+    R[name] = i;
+}
+
+// Загрузка изображений с fallback
 loadImg("dragon", cfg.dragonImg);
-cfg.cactusImgs.forEach((src,i)=>loadImg(`c${i}`,src));
+cfg.cactusImgs.forEach((src,i) => loadImg(`c${i}`, src));
+
+// Fallback изображения если основные не загрузились
+setTimeout(() => {
+    if (!R.dragon.complete) {
+        console.log('Dragon image failed to load, using fallback');
+    }
+}, 1000);
 
 /* ---------- игровые объекты ---------- */
 const dragon = {x:60, y:0, w:44, h:48, vy:0, onGround:false};
 const obstacles = [];
-let frame = 0, score = 0, playing = false;
+let frame = 0, score = 0, playing = false, gameOver = false;
 
 /* ---------- управление ---------- */
 function jump(){
-  if(!playing){
-    playing = true;
-    music.play().catch(()=>{});
-    loop();
-  }
-  if(dragon.onGround){
-    dragon.vy = cfg.lift;
-    dragon.onGround = false;
-  }
-}
-window.addEventListener('keydown', e=>{if(e.code==='Space'){e.preventDefault();jump();}});
-window.addEventListener('touchstart', e=>{e.preventDefault();jump();});
-
-/* ---------- логика ---------- */
-function update(){
-  // гравитация
-  if(!dragon.onGround){
-    dragon.vy += cfg.gravity;
-    dragon.y  += dragon.vy;
-  }
-  if(dragon.y + dragon.h >= cvs.height){
-    dragon.y = cvs.height - dragon.h;
-    dragon.vy = 0;
-    dragon.onGround = true;
-  }
-
-  // препятствия
-  if(frame % cfg.interval === 0){
-    const i = Math.floor(Math.random()*cfg.cactusImgs.length);
-    obstacles.push({x:cvs.width, w:20+Math.random()*10, h:20+Math.random()*15, img:R[`c${i}`]});
-  }
-  obstacles.forEach(o=>o.x -= cfg.speed);
-  while(obstacles.length && obstacles[0].x + obstacles[0].w < 0) obstacles.shift();
-
-  // столкновение
-  obstacles.forEach(o=>{
-    if(dragon.x < o.x+o.w && dragon.x+dragon.w > o.x && dragon.y+dragon.h > cvs.height-o.h){
-      death();
+    // Запуск музыки при первом взаимодействии
+    startMusic();
+    
+    if(!playing && !gameOver){
+        playing = true;
+        gameOver = false;
+        loop();
     }
-  });
+    
+    if(dragon.onGround && playing){
+        dragon.vy = cfg.lift;
+        dragon.onGround = false;
+        
+        // Вибрация в Telegram при прыжке
+        if (isTelegram && tg.HapticFeedback) {
+            tg.HapticFeedback.impactOccurred('light');
+        }
+    }
+}
 
-  score = Math.floor(frame/10);
-  document.getElementById('score').textContent = String(score).padStart(5,'0');
-  document.getElementById('pudge').style.left = (cvs.offsetLeft + dragon.x + dragon.w/2 - 35) + 'px';
-  document.getElementById('pudge').style.top  = (cvs.offsetTop + dragon.y - 30) + 'px';
-  frame++;
+// Управление для всех платформ
+window.addEventListener('keydown', e => {
+    if(e.code === 'Space'){
+        e.preventDefault();
+        jump();
+    }
+});
+
+window.addEventListener('touchstart', e => {
+    e.preventDefault();
+    jump();
+});
+
+window.addEventListener('mousedown', e => {
+    e.preventDefault();
+    jump();
+});
+
+// Предотвращаем контекстное меню на телефонах
+cvs.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    return false;
+});
+
+/* ---------- логика игры ---------- */
+function update(){
+    if (!playing) return;
+    
+    // гравитация
+    if(!dragon.onGround){
+        dragon.vy += cfg.gravity;
+        dragon.y  += dragon.vy;
+    }
+    
+    // проверка земли
+    if(dragon.y + dragon.h >= cvs.height){
+        dragon.y = cvs.height - dragon.h;
+        dragon.vy = 0;
+        dragon.onGround = true;
+    }
+
+    // генерация препятствий
+    if(frame % cfg.interval === 0){
+        const i = Math.floor(Math.random() * cfg.cactusImgs.length);
+        obstacles.push({
+            x: cvs.width, 
+            w: 20 + Math.random() * 10, 
+            h: 20 + Math.random() * 15, 
+            img: R[`c${i}`]
+        });
+    }
+    
+    // движение препятствий
+    obstacles.forEach(o => o.x -= cfg.speed);
+    
+    // удаление вышедших за экран препятствий
+    while(obstacles.length && obstacles[0].x + obstacles[0].w < 0) {
+        obstacles.shift();
+    }
+
+    // проверка столкновений
+    obstacles.forEach(o => {
+        if(dragon.x < o.x + o.w && 
+           dragon.x + dragon.w > o.x && 
+           dragon.y + dragon.h > cvs.height - o.h){
+            death();
+        }
+    });
+
+    // обновление счета
+    score = Math.floor(frame / 10);
+    document.getElementById('score').textContent = String(score).padStart(5, '0');
+    
+    // обновление позиции текста "ПУДЖ"
+    document.getElementById('pudge').style.left = (cvs.offsetLeft + dragon.x + dragon.w / 2 - 35) + 'px';
+    document.getElementById('pudge').style.top = (cvs.offsetTop + dragon.y - 30) + 'px';
+    
+    frame++;
 }
 
 /* ---------- отрисовка ---------- */
 function draw(){
-  ctx.clearRect(0,0,cvs.width,cvs.height);
+    ctx.clearRect(0, 0, cvs.width, cvs.height);
 
-  // земля
-  ctx.fillStyle='#8B4513';
-  ctx.fillRect(0,cvs.height-20,cvs.width,20);          // коричневый «грунт»
+    // земля
+    ctx.fillStyle = '#8B4513';
+    ctx.fillRect(0, cvs.height - 20, cvs.width, 20);
 
-  // дракон
-  if(R.dragon && R.dragon.complete){
-    ctx.drawImage(R.dragon, dragon.x, dragon.y, dragon.w, dragon.h);
-  }else{
-    ctx.fillStyle='#333';
-    ctx.fillRect(dragon.x, dragon.y, dragon.w, dragon.h);
-  }
-
-  // кактусы
-  ctx.fillStyle='#5a5';
-  obstacles.forEach(o=>{
-    if(o.img && o.img.complete){
-      ctx.drawImage(o.img, o.x, cvs.height-o.h, o.w, o.h);
-    }else{
-      ctx.fillRect(o.x, cvs.height-o.h, o.w, o.h);
+    // дракон
+    if(R.dragon && R.dragon.complete){
+        ctx.drawImage(R.dragon, dragon.x, dragon.y, dragon.w, dragon.h);
+    } else {
+        // Fallback прямоугольник
+        ctx.fillStyle = '#333';
+        ctx.fillRect(dragon.x, dragon.y, dragon.w, dragon.h);
     }
-  });
+
+    // кактусы
+    obstacles.forEach(o => {
+        if(o.img && o.img.complete){
+            ctx.drawImage(o.img, o.x, cvs.height - o.h, o.w, o.h);
+        } else {
+            // Fallback прямоугольники для кактусов
+            ctx.fillStyle = '#5a5';
+            ctx.fillRect(o.x, cvs.height - o.h, o.w, o.h);
+        }
+    });
+    
+    // сообщение о Game Over
+    if (gameOver) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(0, 0, cvs.width, cvs.height);
+        
+        ctx.fillStyle = '#fff';
+        ctx.font = '24px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('GAME OVER', cvs.width / 2, cvs.height / 2 - 20);
+        ctx.font = '16px Arial';
+        ctx.fillText('Счет: ' + score, cvs.width / 2, cvs.height / 2 + 10);
+        ctx.fillText('Тапни для рестарта', cvs.width / 2, cvs.height / 2 + 40);
+    }
 }
 
 function loop(){
-  update(); draw();
-  requestAnimationFrame(loop);
+    if (playing) {
+        update(); 
+        draw();
+        requestAnimationFrame(loop);
+    }
 }
 
 function death(){
-  // мгновенный рестарт
-  obstacles.length = 0;
-  frame = 0;
-  dragon.y = cvs.height - dragon.h;
-  dragon.vy = 0;
-  dragon.onGround = true;
+    playing = false;
+    gameOver = true;
+    
+    // Вибрация при смерти в Telegram
+    if (isTelegram && tg.HapticFeedback) {
+        tg.HapticFeedback.impactOccurred('heavy');
+    }
+    
+    draw(); // Отрисовать экран смерти
 }
 
-/* ---------- первый кадр ---------- */
-ctx.fillStyle='#333';
-ctx.textAlign='center';
-ctx.font='20px Arial';
-ctx.fillText('Нажми ПРОБЕЛ / тап для старта', cvs.width/2, cvs.height/2);
+function restartGame(){
+    obstacles.length = 0;
+    frame = 0;
+    score = 0;
+    dragon.y = cvs.height - dragon.h;
+    dragon.vy = 0;
+    dragon.onGround = true;
+    gameOver = false;
+    playing = false;
+    
+    document.getElementById('score').textContent = '00000';
+    drawStartScreen();
+}
+
+function drawStartScreen(){
+    ctx.clearRect(0, 0, cvs.width, cvs.height);
+    
+    // земля
+    ctx.fillStyle = '#8B4513';
+    ctx.fillRect(0, cvs.height - 20, cvs.width, 20);
+    
+    ctx.fillStyle = '#333';
+    ctx.textAlign = 'center';
+    ctx.font = '20px Arial';
+    ctx.fillText('Нажми ПРОБЕЛ / тап для старта', cvs.width / 2, cvs.height / 2);
+    
+    // Специальное сообщение для Telegram
+    if (isTelegram) {
+        ctx.font = '14px Arial';
+        ctx.fillText('Игра в Telegram!', cvs.width / 2, cvs.height / 2 + 30);
+    }
+}
+
+// Обработчик рестарта при тапе на экран смерти
+cvs.addEventListener('click', function(e) {
+    if (gameOver) {
+        restartGame();
+    }
+});
+
+/* ---------- инициализация ---------- */
+// Первый кадр
+drawStartScreen();
+
+// Авто-рестарт при возврате на страницу
+document.addEventListener('visibilitychange', function() {
+    if (!document.hidden && gameOver) {
+        restartGame();
+    }
+});
+
+// Защита от скролла на мобильных
+document.body.style.overflow = 'hidden';
 </script>
 </body>
 </html>
