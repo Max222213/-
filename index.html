@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<title>ПУДЖ РАННЕР</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#222;display:flex;align-items:center;justify-content:center;}
+  canvas{background:#c9f5d9;border-radius:8px;}
+  #score{position:absolute;right:calc(50% - 390px);top:40px;font-size:22px;font-weight:bold;color:#fff;text-shadow:1px 1px 3px #000;}
+  #pudge{position:absolute;font-size:26px;font-weight:bold;color:#fff;text-shadow:1px 1px 3px #000;pointer-events:none;}
+</style>
+</head>
+<body>
+<canvas id="cvs"></canvas>
+<div id="score">00000</div>
+<div id="pudge">ПУДЖ</div>
+
+<script>
+/* ---------- настройки ---------- */
+const cfg = {
+  dragonImg : "img/dragon.png",
+  cactusImgs: ["img/cactus1.png","img/cactus2.png"],
+  musicFile : "img/music.mp3",
+  gravity   : 0.28,
+  lift      : -15,
+  speed     : 1.5,
+  interval  : 200        // кактусы каждые 200 кадров
+};
+
+/* ---------- canvas ---------- */
+const cvs = document.getElementById('cvs');
+const ctx = cvs.getContext('2d');
+cvs.width = 800;
+cvs.height = 150;
+
+/* ---------- аудио ---------- */
+const music = new Audio(cfg.musicFile);
+music.loop = true;
+music.volume = 0.5;
+
+/* ---------- ресурсы ---------- */
+const R = {};
+function loadImg(name,src){ const i=new Image(); i.src=src; R[name]=i; }
+loadImg("dragon", cfg.dragonImg);
+cfg.cactusImgs.forEach((src,i)=>loadImg(`c${i}`,src));
+
+/* ---------- игровые объекты ---------- */
+const dragon = {x:60, y:0, w:44, h:48, vy:0, onGround:false};
+const obstacles = [];
+let frame = 0, score = 0, playing = false;
+
+/* ---------- управление ---------- */
+function jump(){
+  if(!playing){
+    playing = true;
+    music.play().catch(()=>{});
+    loop();
+  }
+  if(dragon.onGround){
+    dragon.vy = cfg.lift;
+    dragon.onGround = false;
+  }
+}
+window.addEventListener('keydown', e=>{if(e.code==='Space'){e.preventDefault();jump();}});
+window.addEventListener('touchstart', e=>{e.preventDefault();jump();});
+
+/* ---------- логика ---------- */
+function update(){
+  // гравитация
+  if(!dragon.onGround){
+    dragon.vy += cfg.gravity;
+    dragon.y  += dragon.vy;
+  }
+  if(dragon.y + dragon.h >= cvs.height){
+    dragon.y = cvs.height - dragon.h;
+    dragon.vy = 0;
+    dragon.onGround = true;
+  }
+
+  // препятствия
+  if(frame % cfg.interval === 0){
+    const i = Math.floor(Math.random()*cfg.cactusImgs.length);
+    obstacles.push({x:cvs.width, w:20+Math.random()*10, h:20+Math.random()*15, img:R[`c${i}`]});
+  }
+  obstacles.forEach(o=>o.x -= cfg.speed);
+  while(obstacles.length && obstacles[0].x + obstacles[0].w < 0) obstacles.shift();
+
+  // столкновение
+  obstacles.forEach(o=>{
+    if(dragon.x < o.x+o.w && dragon.x+dragon.w > o.x && dragon.y+dragon.h > cvs.height-o.h){
+      death();
+    }
+  });
+
+  score = Math.floor(frame/10);
+  document.getElementById('score').textContent = String(score).padStart(5,'0');
+  document.getElementById('pudge').style.left = (cvs.offsetLeft + dragon.x + dragon.w/2 - 35) + 'px';
+  document.getElementById('pudge').style.top  = (cvs.offsetTop + dragon.y - 30) + 'px';
+  frame++;
+}
+
+/* ---------- отрисовка ---------- */
+function draw(){
+  ctx.clearRect(0,0,cvs.width,cvs.height);
+
+  // земля
+  ctx.fillStyle='#8B4513';
+  ctx.fillRect(0,cvs.height-20,cvs.width,20);          // коричневый «грунт»
+
+  // дракон
+  if(R.dragon && R.dragon.complete){
+    ctx.drawImage(R.dragon, dragon.x, dragon.y, dragon.w, dragon.h);
+  }else{
+    ctx.fillStyle='#333';
+    ctx.fillRect(dragon.x, dragon.y, dragon.w, dragon.h);
+  }
+
+  // кактусы
+  ctx.fillStyle='#5a5';
+  obstacles.forEach(o=>{
+    if(o.img && o.img.complete){
+      ctx.drawImage(o.img, o.x, cvs.height-o.h, o.w, o.h);
+    }else{
+      ctx.fillRect(o.x, cvs.height-o.h, o.w, o.h);
+    }
+  });
+}
+
+function loop(){
+  update(); draw();
+  requestAnimationFrame(loop);
+}
+
+function death(){
+  // мгновенный рестарт
+  obstacles.length = 0;
+  frame = 0;
+  dragon.y = cvs.height - dragon.h;
+  dragon.vy = 0;
+  dragon.onGround = true;
+}
+
+/* ---------- первый кадр ---------- */
+ctx.fillStyle='#333';
+ctx.textAlign='center';
+ctx.font='20px Arial';
+ctx.fillText('Нажми ПРОБЕЛ / тап для старта', cvs.width/2, cvs.height/2);
+</script>
+</body>
+</html>
